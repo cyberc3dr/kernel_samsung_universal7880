@@ -1,0 +1,79 @@
+name: Build a7y17lte KernelSU LOS20
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: a7y17lte LOS20 + KernelSU
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout kernel source
+        uses: actions/checkout@v7
+        with:
+          ref: lineage-20
+          fetch-depth: 1
+
+      - name: Checkout zipper (AnyKernel3)
+        uses: actions/checkout@v7
+        with:
+          repository: cyberc3dr/AnyKernel3
+          path: zipper
+
+      - name: Add backslashxx KernelSU + patch 3.18
+        run: |
+          set -e
+          git clone --depth=1 https://github.com/backslashxx/KernelSU.git ksu_temp
+
+          if [ -d "ksu_temp/kernel" ]; then
+            rm -rf drivers/kernelsu
+            cp -r ksu_temp/kernel drivers/kernelsu
+          else
+            rm -rf drivers/kernelsu
+            mkdir -p drivers/kernelsu
+            cp -r ksu_temp/* drivers/kernelsu/
+          fi
+
+          if ! grep -q 'source "drivers/kernelsu/Kconfig"' drivers/Kconfig; then
+            echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
+          fi
+          if ! grep -q 'kernelsu/' drivers/Makefile; then
+            echo 'obj-$(CONFIG_KSU) += kernelsu/' >> drivers/Makefile
+          fi
+
+          find drivers/kernelsu -type f \( -name '*.c' -o -name '*.h' \) -print0 2>/dev/null | \
+            xargs -0 sed -i 's/static uintptr_t selinux_ops_addr = NULL;/static uintptr_t selinux_ops_addr = 0;/g' || true
+
+          find drivers/kernelsu -type f \( -name 'Makefile' -o -name 'Kbuild' -o -name '*.mk' \) -print0 2>/dev/null | \
+            xargs -0 sed -i \
+              -e 's/-Wno-discarded-qualifiers//g' \
+              -e 's/-Wno-incompatible-pointer-types-discards-qualifiers//g' \
+              -e 's/-Wno-macro-redefined//g' \
+              -e 's/-Wno-int-conversion//g' \
+              -e 's/-Wno-implicit-function-declaration//g' \
+              -e 's/-Wno-error=incompatible-pointer-types//g' || true
+
+          for f in drivers/kernelsu/Makefile drivers/kernelsu/Kbuild drivers/kernelsu/kernel/Makefile drivers/kernelsu/core/Makefile; do
+            [ -f "$f" ] && echo 'ccflags-y += -Wno-error' >> "$f"
+          done
+
+          ls drivers/kernelsu | head -15
+          rm -rf ksu_temp
+          echo "==> KernelSU ready!"
+
+      - name: Build kernel a7y17lte
+        uses: cyberc3dr/android-kernel-actions@a57y17lte
+        env:
+          NAME: a7y17lte-ksu-los20
+        with:
+          arch: arm64
+          defconfig: lineage-a7y17lte_defconfig
+          image: Image
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: a7y17lte-los20-ksu
+          path: zipper/*.zip
+          if-no-files-found: error
