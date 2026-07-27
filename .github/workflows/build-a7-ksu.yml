@@ -1,0 +1,75 @@
+name: Build Kernel a7y17lte + KernelSU (lineage-21)
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - lineage-21
+
+jobs:
+  build:
+    name: Build for a7y17lte
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout kernel source
+        uses: actions/checkout@v4
+        with:
+          ref: lineage-21
+          fetch-depth: 1
+
+      - name: Checkout zipper (AnyKernel3)
+        uses: actions/checkout@v4
+        with:
+          repository: cyberc3dr/AnyKernel3
+          path: zipper
+
+      - name: Add backslashxx KernelSU (latest)
+        run: |
+          set -e
+          echo "==> Downloading latest backslashxx KernelSU..."
+          git clone --depth=1 https://github.com/backslashxx/KernelSU.git ksu_temp
+
+          if [ -d "ksu_temp/kernel" ]; then
+            echo "Found ksu_temp/kernel → copying..."
+            rm -rf drivers/kernelsu
+            cp -r ksu_temp/kernel drivers/kernelsu
+          else
+            echo "No kernel folder → copy entire repo..."
+            rm -rf drivers/kernelsu
+            mkdir -p drivers/kernelsu
+            cp -r ksu_temp/* drivers/kernelsu/
+          fi
+
+          if ! grep -q 'source "drivers/kernelsu/Kconfig"' drivers/Kconfig; then
+            echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
+            echo "Added source to drivers/Kconfig"
+          fi
+
+          if ! grep -q 'kernelsu/' drivers/Makefile; then
+            echo 'obj-$(CONFIG_KSU) += kernelsu/' >> drivers/Makefile
+            echo "Added obj to drivers/Makefile"
+          fi
+
+          echo "==> Isi drivers/kernelsu:"
+          ls -la drivers/kernelsu | head -20
+
+          rm -rf ksu_temp
+          echo "==> KernelSU successfully added!"
+
+      - name: Build Android Kernel for a7y17lte
+        uses: cyberc3dr/android-kernel-actions@a57y17lte
+        id: build
+        env:
+          NAME: a7y17lte-kernel
+        with:
+          arch: arm64
+          defconfig: lineage-a7y17lte_defconfig
+          image: Image
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: a7y17lte
+          path: zipper/*.zip
+          if-no-files-found: error
